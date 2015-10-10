@@ -240,6 +240,7 @@ DISSECTOR_SRC = \
 	packet-3com-njack.c	\
 	packet-3com-xns.c	\
 	packet-3g-a11.c		\
+	packet-4c.c		\
 	packet-6lowpan.c	\
 	packet-9p.c		\
 	packet-a21.c		\
