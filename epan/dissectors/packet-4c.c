@@ -55,7 +55,7 @@ static int hf_start        = -1;
 
 static gint ett_4c         = -1;
 
-static gboolean four_c_desegment = TRUE;
+//static gboolean four_c_desegment = TRUE;
 
 #define TYPE_LENGTH         2
 #define LENGTH_LENGTH       2
@@ -85,13 +85,13 @@ static gboolean four_c_desegment = TRUE;
 #define REGISTRATION_REQUEST_TYPE 0x1
 #define REGISTRATION_ACK_TYPE     0x2
 #define REGISTRATION_NACK_TYPE    0x3
-#define HEARTBEAT_REQUEST_TYPE    0x4
-#define HEARTBEAT_ACK_TYPE        0x5
-#define PEER_INFO_TYPE            0x6
-#define ERROR_CAUSE_TYPE          0x7
-#define SET_COLUMN_TYPE           0x8
-#define SET_COLUMN_ACK_TYPE       0x9
-#define SERVER_ANNOUNCE_TYPE      0xa
+#define HEARTBEAT_REQUEST_TYPE    0x800
+#define HEARTBEAT_ACK_TYPE        0x801
+#define PEER_INFO_TYPE            0x4
+#define ERROR_CAUSE_TYPE          0xC00
+#define SET_COLUMN_TYPE           0x400
+#define SET_COLUMN_ACK_TYPE       0x401
+#define SERVER_ANNOUNCE_TYPE      0x1000
 
 static const value_string type_values[] = {
   { REGISTRATION_REQUEST_TYPE, "Registration Request"                  },
@@ -108,21 +108,20 @@ static const value_string type_values[] = {
 
 #define ADD_PADDING(x) ((((x) + 3) >> 2) << 2)
 
-/*
+
 static void
 dissect_message(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *four_c_tree)
 {
 	guint16 type;
 	guint16 value_length;
 	int namelen, pwlen, offset;
-	//ultra workaround :D
 	pinfo = pinfo;
 	type  = tvb_get_ntohs(message_tvb, TYPE_OFFSET);
 
-	if (check_col(pinfo->cinfo, COL_INFO)) {
-		col_add_fstr(pinfo->cinfo, COL_INFO, "%s ", val_to_str(type, type_values, "reserved"));
-		col_set_fence(pinfo->cinfo, COL_INFO);
-	}
+	
+	col_add_fstr(pinfo->cinfo, COL_INFO, "%s ", val_to_str(type, type_values, "reserved"));
+	col_set_fence(pinfo->cinfo, COL_INFO);
+	
 	if (four_c_tree) 
 	{
 		value_length = tvb_get_ntohs(message_tvb, LENGTH_OFFSET) - HEADER_LENGTH;
@@ -155,26 +154,24 @@ dissect_message(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *four_c_tr
 			}
 		}
 	}
-}*/
-/*
+}
+
+
 static void
 dissect_4c_common(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)
 {
-	proto_item *four_c_item;
-	proto_tree *four_c_tree;
+	col_set_str(pinfo->cinfo, COL_PROTOCOL, "4C");
 
-	if (check_col(pinfo->cinfo, COL_PROTOCOL))
-		col_set_str(pinfo->cinfo, COL_PROTOCOL, "4C");
-	 
+	col_clear(pinfo->cinfo, COL_INFO);
+
 	if (tree) {
-		four_c_item = proto_tree_add_item(tree, proto_4c, tvb, 0, -1, FALSE);
+		proto_item *four_c_item = NULL;
+		proto_tree *four_c_tree = NULL;
+		four_c_item = proto_tree_add_item(tree, proto_4c, tvb, 0, -1, ENC_NA);
 		four_c_tree = proto_item_add_subtree(four_c_item, ett_4c);
-	} else {
-		four_c_item = NULL;
-		four_c_tree = NULL;
+		dissect_message(tvb, pinfo, four_c_tree);		
 	}
-	dissect_message(tvb, pinfo, four_c_tree);
-}*/
+}
 
 /*static void
 dissect_4c_sctp(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)
@@ -199,13 +196,24 @@ dissect_4c_tcp(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)
 {
 	tcp_dissect_pdus(tvb, pinfo, tree, four_c_desegment, HEADER_LENGTH, get_4c_pdu_len, dissect_4c_tcp_pdu);
 }
-
+*/
 static void
 dissect_4c_udp(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)
 {
 	dissect_4c_common(tvb, pinfo, tree);
-}*/
+}
 
+/*
+static gboolean
+dissect_4c_heur(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void *data)
+{
+    if (!test_4c_packet(tvb, pinfo, tree, data))
+        return FALSE;
+
+    dissect_carp(tvb, pinfo, tree, data);
+    return TRUE;
+}
+*/
 void
 proto_register_4c(void)
 {
@@ -224,7 +232,7 @@ proto_register_4c(void)
 	};
 
 	static gint *ett[] = {
-	&ett_4c,
+		&ett_4c
 	};
 
 	module_t *four_c_module;
@@ -247,14 +255,15 @@ proto_reg_handoff_4c(void)
 {
 	//dissector_handle_t four_c_sctp_handle;
 	//dissector_handle_t four_c_tcp_handle;
-	//dissector_handle_t four_c_udp_handle;
+	static dissector_handle_t four_c_udp_handle;
 
 	//four_c_sctp_handle = create_dissector_handle(dissect_4c_sctp, proto_4c);
 	//four_c_tcp_handle  = create_dissector_handle(dissect_4c_tcp,  proto_4c);
-	//four_c_udp_handle  = create_dissector_handle(dissect_4c_udp,  proto_4c);
+	four_c_udp_handle  = create_dissector_handle(dissect_4c_udp,  proto_4c);
 
 	//dissector_add("sctp.port", SCTP_PORT_4C, four_c_sctp_handle);
 	//dissector_add("tcp.port",  TCP_PORT_4C,  four_c_tcp_handle);
-	//dissector_add("udp.port",  UDP_PORT_4C,  four_c_udp_handle);
+	dissector_add_uint("udp.port",  UDP_PORT_4C,  four_c_udp_handle);
+	//heur_dissector_add( "udp", dissect_4c_heur, "4C over UDP", "4c_udp", proto_4c, HEURISTIC_ENABLE);
 }
 
