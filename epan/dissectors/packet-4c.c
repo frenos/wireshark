@@ -54,6 +54,7 @@ static int hf_name         = -1;
 static int hf_pw           = -1;
 static int hf_start        = -1;
 static int hf_error	   = -1;
+static int hf_other        = -1;
 
 static gint ett_4c         = -1;
 
@@ -70,6 +71,7 @@ static gint error_type     = -1;
 #define PWLENGTH_LENGTH	    2
 #define START_LENGTH        4
 #define ERROR_LENGTH        4
+#define ERROR_CAUSE_LENGTH  4
 
 #define NAME_LENGTH        20
 #define PW_LENGTH          20
@@ -101,7 +103,7 @@ static gint error_type     = -1;
 #define ERROR_COLUMN_OUT_OF_RANGE 1
 #define ERROR_COLUMN_FULL         2
 #define ERROR_UNKNOWN_TYPE        3
-#define ERROR_OTHER               4294967295
+#define ERROR_OTHER               4294967295 //0xffffffff 
 
 static const value_string type_values[] = {
   { REGISTRATION_REQUEST_TYPE, "Registration Request"                  },
@@ -128,25 +130,36 @@ static const value_string error_values[] = {
 static void
 dissect_4c_error(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *four_c_tree)
 {
+  proto_item *error_item = NULL;
+  proto_tree *error_tree = NULL;
+  int message_length = -1;
+  
   pinfo = pinfo;
   error_type = tvb_get_guint32(message_tvb,ERROR_OFFSET, NETWORK_BYTE_ORDER);
-  proto_tree_add_item(four_c_tree,hf_error, message_tvb, ERROR_OFFSET, ERROR_LENGTH, NETWORK_BYTE_ORDER );
+  
+  error_item = proto_tree_add_item(four_c_tree,hf_error, message_tvb, ERROR_OFFSET, ERROR_LENGTH, NETWORK_BYTE_ORDER );
+  error_tree = proto_item_add_subtree(error_item, hf_error);
   switch(error_type){
     case ERROR_COLUMN_OUT_OF_RANGE:
       col_add_fstr(pinfo->cinfo, COL_INFO, "- %s","Column out of range");
+      proto_tree_add_item(error_tree,hf_value_col, message_tvb, ERROR_OFFSET+ERROR_LENGTH, ERROR_CAUSE_LENGTH, NETWORK_BYTE_ORDER );
       break;
     case ERROR_COLUMN_FULL:
       col_add_fstr(pinfo->cinfo, COL_INFO, "- %s","Column is full");
+      proto_tree_add_item(error_tree,hf_value_col, message_tvb, ERROR_OFFSET+ERROR_LENGTH, ERROR_CAUSE_LENGTH, NETWORK_BYTE_ORDER );
       break;
     case ERROR_UNKNOWN_TYPE:
       col_add_fstr(pinfo->cinfo, COL_INFO, "- %s","Unknown error");
       break;
     case ERROR_OTHER:
+      
+      message_length = tvb_get_guint16(message_tvb,LENGTH_OFFSET, NETWORK_BYTE_ORDER);
+      message_length = message_length -(ERROR_OFFSET+ERROR_LENGTH);
+      proto_tree_add_item(error_tree, hf_other, message_tvb, ERROR_OFFSET+ERROR_LENGTH, message_length, NETWORK_BYTE_ORDER);
       col_add_fstr(pinfo->cinfo, COL_INFO, "- %s","Other Error");
       break;
     default:
       col_add_fstr(pinfo->cinfo, COL_INFO, "- %s","default");
-      
   }
   
 }
@@ -276,7 +289,8 @@ proto_register_4c(void)
 	  { &hf_peer_address, { "Peer address",    "4c.peeraddress", FT_IPv4,   BASE_NONE, NULL,               0x0, "", HFILL} },
 	  { &hf_name,         { "User Name",       "4c.username",    FT_STRING, BASE_NONE, NULL,               0x0, "", HFILL} },
 	  { &hf_pw,           { "User Password",   "4c.password",    FT_STRING, BASE_NONE, NULL,               0x0, "", HFILL} },
-	  { &hf_error,        { "Error",           "4c.error",       FT_UINT32, BASE_DEC,  VALS(error_values), 0x0, "", HFILL} }
+	  { &hf_error,        { "Error",           "4c.error",       FT_UINT32, BASE_DEC,  VALS(error_values), 0x0, "", HFILL} },
+	  { &hf_other,        { "Other",           "4c.other",       FT_STRING, BASE_NONE, NULL,               0x0, "", HFILL} }
 	};
 
 	static gint *ett[] = {
