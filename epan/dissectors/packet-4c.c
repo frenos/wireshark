@@ -46,7 +46,7 @@
 static int proto_4c        = -1;
 
 //static conversation_t *conversation;
-//static guint32 new_4c_ppid = 58;
+static guint32 new_4c_ppid = 58;
 
 static int hf_type         = -1;
 static int hf_length       = -1;
@@ -66,6 +66,8 @@ static gint ett_4c         = -1;
 
 static gboolean four_c_desegment = TRUE;
 static gint error_type     = -1;
+
+static expert_field ei_4c_type_unknown = EI_INIT;
 
 #define TYPE_LENGTH         2
 #define LENGTH_LENGTH       2
@@ -156,7 +158,7 @@ dissect_4c_error(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *four_c_t
       proto_tree_add_item(error_tree,hf_value_col, message_tvb, ERROR_OFFSET+ERROR_LENGTH, ERROR_CAUSE_LENGTH, NETWORK_BYTE_ORDER );
       break;
     case ERROR_UNKNOWN_TYPE:
-      col_add_fstr(pinfo->cinfo, COL_INFO, "- %s","Unknown error");
+      col_add_fstr(pinfo->cinfo, COL_INFO, "- %s","Unknown Error");
       break;
     case ERROR_OTHER:
       
@@ -191,22 +193,26 @@ dissect_message(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *four_c_tr
 {
 	guint16 type;
 	guint16 value_length;
-	pinfo = pinfo;
+	proto_item *msg_type_item;
 	type  = tvb_get_ntohs(message_tvb, TYPE_OFFSET);
 	
-	col_add_fstr(pinfo->cinfo, COL_INFO, "%s ", val_to_str(type, type_values, "reserved"));
+	col_add_fstr(pinfo->cinfo, COL_INFO, "%s ", val_to_str(type, type_values, "Unknown Type"));
 	col_set_fence(pinfo->cinfo, COL_INFO);
 	
 	if (four_c_tree) 
 	{
 		value_length = tvb_get_ntohs(message_tvb, LENGTH_OFFSET) - HEADER_LENGTH;
-		proto_tree_add_item(four_c_tree, hf_type,   message_tvb, TYPE_OFFSET,   TYPE_LENGTH,   NETWORK_BYTE_ORDER);
+		msg_type_item = proto_tree_add_item(four_c_tree, hf_type,   message_tvb, TYPE_OFFSET,   TYPE_LENGTH,   NETWORK_BYTE_ORDER);
 		proto_tree_add_item(four_c_tree, hf_length, message_tvb, LENGTH_OFFSET, LENGTH_LENGTH, NETWORK_BYTE_ORDER);
 
 		if (value_length > 0) {
 			switch (type) {
 			case REGISTRATION_REQUEST_TYPE:
 				dissect_4c_registration(message_tvb, pinfo, four_c_tree);
+				break;	
+			case HEARTBEAT_REQUEST_TYPE:
+			case HEARTBEAT_ACK_TYPE:
+				proto_tree_add_item(four_c_tree, hf_value, message_tvb, VALUE_OFFSET, value_length, NETWORK_BYTE_ORDER);
 				break;
 			case SET_COLUMN_TYPE:
 				proto_tree_add_item(four_c_tree, hf_value_seq, message_tvb, SEQNO_OFFSET, SEQNO_LENGTH,NETWORK_BYTE_ORDER);
@@ -222,7 +228,8 @@ dissect_message(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *four_c_tr
 				dissect_4c_error(message_tvb,pinfo,four_c_tree);
 				break;
 			default:
-				proto_tree_add_item(four_c_tree, hf_value, message_tvb, VALUE_OFFSET, value_length, NETWORK_BYTE_ORDER);
+				//msg_item = proto_tree_add_item(four_c_tree, hf_type, message_tvb, TYPE_OFFSET, TYPE_LENGTH, NETWORK_BYTE_ORDER);
+				expert_add_info(pinfo, msg_type_item, &ei_4c_type_unknown);
 			}
 		}
 	}
@@ -280,21 +287,24 @@ dissect_4c_udp(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)
 	dissect_4c_common(tvb, pinfo, tree);
 }
 
-
+/*
 static gboolean
 dissect_4c_heur(tvbuff_t *tvb _U_, packet_info *pinfo _U_, proto_tree *tree _U_, void *data _U_)
 {
-    //conversation = find_or_create_conversation(pinfo)
-    //conversation_set_dissector(conversation);
-   /* if (!test_4c_packet(tvb, pinfo, tree, data))
-        return FALSE; */
+    conversation = find_or_create_conversation(pinfo)
+    conversation_set_dissector(conversation);
+    if (!test_4c_packet(tvb, pinfo, tree, data))
+        return FALSE; 
     dissect_4c_sctp(tvb, pinfo, tree, data);
     return TRUE;
 }
-
+*/
 void
 proto_register_4c(void)
 {
+        module_t *four_c_module;
+	expert_module_t *expert_4c;
+	
 	static hf_register_info hf[] = 
 	{ { &hf_type,         { "Message type",    "4c.type",        FT_UINT16, BASE_HEX,  VALS(type_values),  0x0, "", HFILL} },
 	  { &hf_length,       { "Message length",  "4c.length",      FT_UINT16, BASE_DEC,  NULL,               0x0, "", HFILL} },
@@ -315,13 +325,17 @@ proto_register_4c(void)
 		&ett_4c
 	};
 
-	module_t *four_c_module;
+	static ei_register_info ei[] = {
+          { &ei_4c_type_unknown, { "4c.type_unknown", PI_MALFORMED, PI_ERROR, "Type is unknown", EXPFILL }},
+        };
+	
 
 	proto_4c = proto_register_protocol("Four Connect", "4C", "4c");
 
 	proto_register_field_array(proto_4c, hf, array_length(hf));
 	proto_register_subtree_array(ett, array_length(ett));
-
+	expert_4c = expert_register_protocol(proto_4c);
+	expert_register_field_array(expert_4c, ei, array_length(ei));
 	four_c_module = prefs_register_protocol(proto_4c, NULL);
 	prefs_register_bool_preference(four_c_module, 
 	                               "desegment_4c_messages",
@@ -333,21 +347,21 @@ proto_register_4c(void)
 void
 proto_reg_handoff_4c(void)
 {
-	//static dissector_handle_t four_c_sctp_handle;
+	static dissector_handle_t four_c_sctp_handle;
 	static dissector_handle_t four_c_tcp_handle;
 	static dissector_handle_t four_c_udp_handle;
-	//static guint32            current_ppid;
+	static guint32            current_ppid;
 	
 	
-	//four_c_sctp_handle = new_create_dissector_handle(dissect_4c_sctp, proto_4c);
+	four_c_sctp_handle = new_create_dissector_handle(dissect_4c_sctp, proto_4c);
 	four_c_tcp_handle  = new_create_dissector_handle(dissect_4c_tcp,  proto_4c);
 	four_c_udp_handle  = create_dissector_handle(dissect_4c_udp,  proto_4c);
 
-	//current_ppid = new_4c_ppid;
-	//dissector_add_uint("sctp.ppi", current_ppid, four_c_sctp_handle);
-	//dissector_add_uint("sctp.port", SCTP_PORT_4C, four_c_sctp_handle);
+	current_ppid = new_4c_ppid;
+	dissector_add_uint("sctp.ppi", current_ppid, four_c_sctp_handle);
+	dissector_add_uint("sctp.port", SCTP_PORT_4C, four_c_sctp_handle);
 	dissector_add_uint("tcp.port",  TCP_PORT_4C,  four_c_tcp_handle);
 	dissector_add_uint("udp.port",  UDP_PORT_4C,  four_c_udp_handle);
-	heur_dissector_add( "sctp", dissect_4c_heur, "4C over SCTP", "4c_sctp", proto_4c, HEURISTIC_ENABLE);
+	//heur_dissector_add( "sctp", dissect_4c_heur, "4C over SCTP", "4c_sctp", proto_4c, HEURISTIC_ENABLE);
 }
 
