@@ -52,6 +52,7 @@ static int hf_pw_length    = -1;
 static int hf_name         = -1;
 static int hf_pw           = -1;
 static int hf_start        = -1;
+static int hf_error	   = -1;
 
 static gint ett_4c         = -1;
 
@@ -66,6 +67,7 @@ static gboolean four_c_desegment = TRUE;
 #define NAMELENGTH_LENGTH	2
 #define PWLENGTH_LENGTH	    2
 #define START_LENGTH        4
+#define ERROR_LENGTH        4
 
 #define NAME_LENGTH        20
 #define PW_LENGTH          20
@@ -79,6 +81,7 @@ static gboolean four_c_desegment = TRUE;
 #define NAMELENGTH_OFFSET  VALUE_OFFSET
 #define	PWLENGTH_OFFSET	   (NAMELENGTH_OFFSET + NAMELENGTH_LENGTH)
 #define NAME_OFFSET		   (PWLENGTH_OFFSET + PWLENGTH_LENGTH)
+#define ERROR_OFFSET	   (LENGTH_OFFSET + LENGTH_LENGTH)
 
 #define ADDRESS_OFFSET     (VALUE_OFFSET + START_LENGTH)
 
@@ -148,6 +151,9 @@ dissect_message(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *four_c_tr
 				break;
 			case PEER_INFO_TYPE:
 				proto_tree_add_item(four_c_tree, hf_peer_address, message_tvb, ADDRESS_OFFSET, IPV4_ADDRESS_LENGTH,	NETWORK_BYTE_ORDER);
+				break;
+			case ERROR_CAUSE_TYPE:
+				proto_tree_add_item(four_c_tree,hf_error, message_tvb, ERROR_OFFSET, ERROR_LENGTH, NETWORK_BYTE_ORDER );
 				break;
 			default:
 				proto_tree_add_item(four_c_tree, hf_value, message_tvb, VALUE_OFFSET, value_length, NETWORK_BYTE_ORDER);
@@ -230,7 +236,8 @@ proto_register_4c(void)
 	  { &hf_start,        { "Player",          "4c.start",       FT_UINT32, BASE_DEC,  NULL,               0x0, "", HFILL} },
 	  { &hf_peer_address, { "Peer address",    "4c.peeraddress", FT_IPv4,   BASE_NONE, NULL,               0x0, "", HFILL} },
 	  { &hf_name,         { "User Name",       "4c.username",    FT_STRING, BASE_NONE, NULL,               0x0, "", HFILL} },
-	  { &hf_pw,           { "User Password",   "4c.password",    FT_STRING, BASE_NONE, NULL,               0x0, "", HFILL} }
+	  { &hf_pw,           { "User Password",   "4c.password",    FT_STRING, BASE_NONE, NULL,               0x0, "", HFILL} },
+	  { &hf_error,        { "Error",           "4c.error",       FT_UINT32, BASE_DEC,  NULL,               0x0, "", HFILL} }
 	};
 
 	static gint *ett[] = {
