@@ -72,6 +72,7 @@ static gint error_type     = -1;
 #define START_LENGTH        4
 #define ERROR_LENGTH        4
 #define ERROR_CAUSE_LENGTH  4
+#define RESERVED_LENGTH     4
 
 #define NAME_LENGTH        20
 #define PW_LENGTH          20
@@ -84,7 +85,7 @@ static gint error_type     = -1;
 #define COLUMN_OFFSET	   (VALUE_OFFSET + SEQNO_LENGTH)
 #define NAMELENGTH_OFFSET  VALUE_OFFSET
 #define	PWLENGTH_OFFSET	   (NAMELENGTH_OFFSET + NAMELENGTH_LENGTH)
-#define NAME_OFFSET		   (PWLENGTH_OFFSET + PWLENGTH_LENGTH)
+#define NAME_OFFSET	   (PWLENGTH_OFFSET + PWLENGTH_LENGTH + RESERVED_LENGTH)
 #define ERROR_OFFSET	   (LENGTH_OFFSET + LENGTH_LENGTH)
 
 #define ADDRESS_OFFSET     (VALUE_OFFSET + START_LENGTH)
@@ -164,16 +165,28 @@ dissect_4c_error(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *four_c_t
   
 }
   
-
+static void
+dissect_4c_registration(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *four_c_tree)
+{
+      int namelen, pwlen, offset;
+      
+      pinfo = pinfo;
+      proto_tree_add_item(four_c_tree, hf_name_length, message_tvb, NAMELENGTH_OFFSET, NAMELENGTH_LENGTH, NETWORK_BYTE_ORDER);
+      proto_tree_add_item(four_c_tree, hf_pw_length,   message_tvb, PWLENGTH_OFFSET,   PWLENGTH_LENGTH,   NETWORK_BYTE_ORDER);
+      namelen=tvb_get_guint16(message_tvb, NAMELENGTH_OFFSET, NETWORK_BYTE_ORDER);
+      proto_tree_add_item(four_c_tree, hf_name, message_tvb, NAME_OFFSET, namelen,FALSE);
+      pwlen=tvb_get_ntohs(message_tvb, PWLENGTH_OFFSET);
+      offset=ADD_PADDING(namelen);
+      proto_tree_add_item(four_c_tree, hf_pw, message_tvb, NAME_OFFSET+offset, pwlen,FALSE);
+}
+  
 static void
 dissect_message(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *four_c_tree)
 {
 	guint16 type;
 	guint16 value_length;
-	int namelen, pwlen, offset;
 	pinfo = pinfo;
 	type  = tvb_get_ntohs(message_tvb, TYPE_OFFSET);
-
 	
 	col_add_fstr(pinfo->cinfo, COL_INFO, "%s ", val_to_str(type, type_values, "reserved"));
 	col_set_fence(pinfo->cinfo, COL_INFO);
@@ -187,13 +200,7 @@ dissect_message(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *four_c_tr
 		if (value_length > 0) {
 			switch (type) {
 			case REGISTRATION_REQUEST_TYPE:
-				proto_tree_add_item(four_c_tree, hf_name_length, message_tvb, NAMELENGTH_OFFSET, NAMELENGTH_LENGTH, NETWORK_BYTE_ORDER);
-				proto_tree_add_item(four_c_tree, hf_pw_length,   message_tvb, PWLENGTH_OFFSET,   PWLENGTH_LENGTH,   NETWORK_BYTE_ORDER);
-				namelen=tvb_get_ntohs(message_tvb, NAMELENGTH_OFFSET);
-				proto_tree_add_item(four_c_tree, hf_name, message_tvb, NAME_OFFSET, namelen,FALSE);
-				pwlen=tvb_get_ntohs(message_tvb, PWLENGTH_OFFSET);
-				offset=ADD_PADDING(namelen);
-				proto_tree_add_item(four_c_tree, hf_pw, message_tvb, NAME_OFFSET+offset, pwlen,FALSE);
+				dissect_4c_registration(message_tvb, pinfo, four_c_tree);
 				break;
 			case SET_COLUMN_TYPE:
 				proto_tree_add_item(four_c_tree, hf_value_seq, message_tvb, SEQNO_OFFSET, SEQNO_LENGTH,NETWORK_BYTE_ORDER);
