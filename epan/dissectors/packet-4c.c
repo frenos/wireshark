@@ -29,11 +29,14 @@
 # include "config.h"
 #endif
 
-#include "epan/packet.h"
-#include "epan/proto.h"
-#include "packet-tcp.h"
-#include "prefs.h"
+#include <epan/packet.h>
+#include <epan/expert.h>
+#include <epan/prefs.h>
+#include <epan/sctpppids.h>
 #include <tvbuff-int.h>
+#include <epan/conversation.h>
+#include <stdio.h>
+#include "packet-tcp.h"
 
 #define NETWORK_BYTE_ORDER FALSE
 #define SCTP_PORT_4C       55555
@@ -41,6 +44,9 @@
 #define UDP_PORT_4C        55555
 
 static int proto_4c        = -1;
+
+//static conversation_t *conversation;
+//static guint32 new_4c_ppid = 58;
 
 static int hf_type         = -1;
 static int hf_length       = -1;
@@ -231,10 +237,12 @@ dissect_4c_common(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)
 	}
 }
 
-static void
-dissect_4c_sctp(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)
+
+static int
+dissect_4c_sctp(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void *data _U_)
 {
 	dissect_4c_common(tvb, pinfo, tree);
+	return tvb_reported_length(tvb);
 }
 
 static guint
@@ -260,20 +268,23 @@ dissect_4c_tcp(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void *data)
 static void
 dissect_4c_udp(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)
 {
+	printf("Hallo Welt!");
+    fflush(stdout);
 	dissect_4c_common(tvb, pinfo, tree);
 }
 
-/*
-static gboolean
-dissect_4c_heur(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void *data)
-{
-    if (!test_4c_packet(tvb, pinfo, tree, data))
-        return FALSE;
 
-    dissect_carp(tvb, pinfo, tree, data);
+static gboolean
+dissect_4c_heur(tvbuff_t *tvb _U_, packet_info *pinfo _U_, proto_tree *tree _U_, void *data _U_)
+{
+    //conversation = find_or_create_conversation(pinfo)
+    //conversation_set_dissector(conversation);
+   /* if (!test_4c_packet(tvb, pinfo, tree, data))
+        return FALSE; */
+    dissect_4c_sctp(tvb, pinfo, tree, data);
     return TRUE;
 }
-*/
+
 void
 proto_register_4c(void)
 {
@@ -315,17 +326,21 @@ proto_register_4c(void)
 void
 proto_reg_handoff_4c(void)
 {
-	static dissector_handle_t four_c_sctp_handle;
+	//static dissector_handle_t four_c_sctp_handle;
 	static dissector_handle_t four_c_tcp_handle;
 	static dissector_handle_t four_c_udp_handle;
-
-	four_c_sctp_handle = create_dissector_handle(dissect_4c_sctp, proto_4c);
+	//static guint32            current_ppid;
+	
+	
+	//four_c_sctp_handle = new_create_dissector_handle(dissect_4c_sctp, proto_4c);
 	four_c_tcp_handle  = new_create_dissector_handle(dissect_4c_tcp,  proto_4c);
 	four_c_udp_handle  = create_dissector_handle(dissect_4c_udp,  proto_4c);
 
-	dissector_add_uint("sctp.port", SCTP_PORT_4C, four_c_sctp_handle);
+	//current_ppid = new_4c_ppid;
+	//dissector_add_uint("sctp.ppi", current_ppid, four_c_sctp_handle);
+	//dissector_add_uint("sctp.port", SCTP_PORT_4C, four_c_sctp_handle);
 	dissector_add_uint("tcp.port",  TCP_PORT_4C,  four_c_tcp_handle);
 	dissector_add_uint("udp.port",  UDP_PORT_4C,  four_c_udp_handle);
-	//heur_dissector_add( "udp", dissect_4c_heur, "4C over UDP", "4c_udp", proto_4c, HEURISTIC_ENABLE);
+	heur_dissector_add( "sctp", dissect_4c_heur, "4C over SCTP", "4c_sctp", proto_4c, HEURISTIC_ENABLE);
 }
 
