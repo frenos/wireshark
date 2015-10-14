@@ -33,6 +33,7 @@
 #include "epan/proto.h"
 #include "packet-tcp.h"
 #include "prefs.h"
+#include <tvbuff-int.h>
 
 #define NETWORK_BYTE_ORDER FALSE
 #define SCTP_PORT_4C       55555
@@ -57,6 +58,7 @@ static int hf_error	   = -1;
 static gint ett_4c         = -1;
 
 static gboolean four_c_desegment = TRUE;
+static gint error_type     = -1;
 
 #define TYPE_LENGTH         2
 #define LENGTH_LENGTH       2
@@ -88,13 +90,18 @@ static gboolean four_c_desegment = TRUE;
 #define REGISTRATION_REQUEST_TYPE 0x1
 #define REGISTRATION_ACK_TYPE     0x2
 #define REGISTRATION_NACK_TYPE    0x3
-#define HEARTBEAT_REQUEST_TYPE    0x800
-#define HEARTBEAT_ACK_TYPE        0x801
 #define PEER_INFO_TYPE            0x4
-#define ERROR_CAUSE_TYPE          0xC00
 #define SET_COLUMN_TYPE           0x400
 #define SET_COLUMN_ACK_TYPE       0x401
+#define HEARTBEAT_REQUEST_TYPE    0x800
+#define HEARTBEAT_ACK_TYPE        0x801
+#define ERROR_CAUSE_TYPE          0xC00
 #define SERVER_ANNOUNCE_TYPE      0x1000
+
+#define ERROR_COLUMN_OUT_OF_RANGE 1
+#define ERROR_COLUMN_FULL         2
+#define ERROR_UNKNOWN_TYPE        3
+#define ERROR_OTHER               4294967295
 
 static const value_string type_values[] = {
   { REGISTRATION_REQUEST_TYPE, "Registration Request"                  },
@@ -107,10 +114,43 @@ static const value_string type_values[] = {
   { SET_COLUMN_TYPE,           "Set Column"                            },
   { SET_COLUMN_ACK_TYPE,       "Set Column Acknowledgement"            },
   { SERVER_ANNOUNCE_TYPE,      "Server Announcement"                   },
-  { 0,                         NULL                                    }};
+  { 0,                         NULL                                    }}; 
+
+static const value_string error_values[] = {
+  {ERROR_COLUMN_OUT_OF_RANGE, "Column Out Of Range"},
+  {ERROR_COLUMN_FULL, "Column Is Full"},
+  {ERROR_UNKNOWN_TYPE, "Unknown Error"},
+  {ERROR_OTHER, "Other Error, see details"}
+};  
 
 #define ADD_PADDING(x) ((((x) + 3) >> 2) << 2)
 
+static void
+dissect_4c_error(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *four_c_tree)
+{
+  pinfo = pinfo;
+  error_type = tvb_get_guint32(message_tvb,ERROR_OFFSET, NETWORK_BYTE_ORDER);
+  proto_tree_add_item(four_c_tree,hf_error, message_tvb, ERROR_OFFSET, ERROR_LENGTH, NETWORK_BYTE_ORDER );
+  switch(error_type){
+    case ERROR_COLUMN_OUT_OF_RANGE:
+      col_add_fstr(pinfo->cinfo, COL_INFO, "- %s","Column out of range");
+      break;
+    case ERROR_COLUMN_FULL:
+      col_add_fstr(pinfo->cinfo, COL_INFO, "- %s","Column is full");
+      break;
+    case ERROR_UNKNOWN_TYPE:
+      col_add_fstr(pinfo->cinfo, COL_INFO, "- %s","Unknown error");
+      break;
+    case ERROR_OTHER:
+      col_add_fstr(pinfo->cinfo, COL_INFO, "- %s","Other Error");
+      break;
+    default:
+      col_add_fstr(pinfo->cinfo, COL_INFO, "- %s","default");
+      
+  }
+  
+}
+  
 
 static void
 dissect_message(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *four_c_tree)
@@ -153,7 +193,7 @@ dissect_message(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *four_c_tr
 				proto_tree_add_item(four_c_tree, hf_peer_address, message_tvb, ADDRESS_OFFSET, IPV4_ADDRESS_LENGTH,	NETWORK_BYTE_ORDER);
 				break;
 			case ERROR_CAUSE_TYPE:
-				proto_tree_add_item(four_c_tree,hf_error, message_tvb, ERROR_OFFSET, ERROR_LENGTH, NETWORK_BYTE_ORDER );
+				dissect_4c_error(message_tvb,pinfo,four_c_tree);
 				break;
 			default:
 				proto_tree_add_item(four_c_tree, hf_value, message_tvb, VALUE_OFFSET, value_length, NETWORK_BYTE_ORDER);
@@ -161,7 +201,6 @@ dissect_message(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *four_c_tr
 		}
 	}
 }
-
 
 static void
 dissect_4c_common(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)
@@ -237,7 +276,7 @@ proto_register_4c(void)
 	  { &hf_peer_address, { "Peer address",    "4c.peeraddress", FT_IPv4,   BASE_NONE, NULL,               0x0, "", HFILL} },
 	  { &hf_name,         { "User Name",       "4c.username",    FT_STRING, BASE_NONE, NULL,               0x0, "", HFILL} },
 	  { &hf_pw,           { "User Password",   "4c.password",    FT_STRING, BASE_NONE, NULL,               0x0, "", HFILL} },
-	  { &hf_error,        { "Error",           "4c.error",       FT_UINT32, BASE_DEC,  NULL,               0x0, "", HFILL} }
+	  { &hf_error,        { "Error",           "4c.error",       FT_UINT32, BASE_DEC,  VALS(error_values), 0x0, "", HFILL} }
 	};
 
 	static gint *ett[] = {
