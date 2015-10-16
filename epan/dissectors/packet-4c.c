@@ -54,6 +54,9 @@ static int hf_value        = -1;
 static int hf_value_seq    = -1;
 static int hf_value_col    = -1;
 static int hf_peer_address = -1;
+static int hf_peer_port    = -1;
+static int hf_peer_start   = -1; 
+
 static int hf_name_length  = -1;
 static int hf_pw_length    = -1;
 static int hf_name         = -1;
@@ -81,6 +84,9 @@ static expert_field ei_4c_type_unknown = EI_INIT;
 #define ERROR_LENGTH        4
 #define ERROR_CAUSE_LENGTH  4
 #define RESERVED_LENGTH     4
+#define PORT_LENGTH	    2
+#define PSTART_LENGTH       2
+#define PNAMELENGTH_LENGTH  2
 
 #define NAME_LENGTH        20
 #define PW_LENGTH          20
@@ -96,7 +102,11 @@ static expert_field ei_4c_type_unknown = EI_INIT;
 #define NAME_OFFSET	   (PWLENGTH_OFFSET + PWLENGTH_LENGTH + RESERVED_LENGTH)
 #define ERROR_OFFSET	   (LENGTH_OFFSET + LENGTH_LENGTH)
 
-#define ADDRESS_OFFSET     (VALUE_OFFSET + START_LENGTH)
+#define ADDRESS_OFFSET     (LENGTH_OFFSET + LENGTH_LENGTH)
+#define PORT_OFFSET	   (ADDRESS_OFFSET + IPV4_ADDRESS_LENGTH)
+#define PSTART_OFFSET      (PORT_OFFSET + PORT_LENGTH)
+#define PNAMELENGTH_OFFSET (PSTART_OFFSET+PSTART_LENGTH)
+#define PNAME_OFFSET       (PNAMELENGTH_OFFSET+PNAMELENGTH_LENGTH +RESERVED_LENGTH)
 
 #define REGISTRATION_REQUEST_TYPE 0x1
 #define REGISTRATION_ACK_TYPE     0x2
@@ -187,6 +197,19 @@ dissect_4c_registration(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *f
       offset=ADD_PADDING(namelen);
       proto_tree_add_item(four_c_tree, hf_pw, message_tvb, NAME_OFFSET+offset, pwlen,FALSE);
 }
+
+static void
+dissect_4c_peerinfo(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *four_c_tree)
+{
+      int namelen;
+      pinfo = pinfo;
+      proto_tree_add_item(four_c_tree, hf_peer_address, message_tvb, ADDRESS_OFFSET, IPV4_ADDRESS_LENGTH,NETWORK_BYTE_ORDER);
+      proto_tree_add_item(four_c_tree, hf_peer_port, message_tvb, PORT_OFFSET, PORT_LENGTH,NETWORK_BYTE_ORDER);
+      proto_tree_add_item(four_c_tree, hf_peer_start, message_tvb, PSTART_OFFSET, PSTART_LENGTH,NETWORK_BYTE_ORDER);
+      proto_tree_add_item(four_c_tree, hf_name_length, message_tvb, PNAMELENGTH_OFFSET, PNAMELENGTH_LENGTH, NETWORK_BYTE_ORDER);
+      namelen=tvb_get_guint16(message_tvb, PNAMELENGTH_OFFSET, NETWORK_BYTE_ORDER);
+      proto_tree_add_item(four_c_tree, hf_name, message_tvb, PNAME_OFFSET, namelen, NETWORK_BYTE_ORDER);
+}
   
 static void
 dissect_message(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *four_c_tree)
@@ -222,7 +245,7 @@ dissect_message(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *four_c_tr
 				proto_tree_add_item(four_c_tree, hf_value_seq, message_tvb, SEQNO_OFFSET, SEQNO_LENGTH, NETWORK_BYTE_ORDER);
 				break;
 			case PEER_INFO_TYPE:
-				proto_tree_add_item(four_c_tree, hf_peer_address, message_tvb, ADDRESS_OFFSET, IPV4_ADDRESS_LENGTH,	NETWORK_BYTE_ORDER);
+				dissect_4c_peerinfo(message_tvb,pinfo,four_c_tree);
 				break;
 			case ERROR_CAUSE_TYPE:
 				dissect_4c_error(message_tvb,pinfo,four_c_tree);
@@ -314,7 +337,9 @@ proto_register_4c(void)
 	  { &hf_name_length,  { "Username length", "4c.namelength",  FT_UINT32, BASE_DEC,  NULL,               0x0, "", HFILL} },
 	  { &hf_pw_length,    { "Password length", "4c.pwlength",    FT_UINT32, BASE_DEC,  NULL,               0x0, "", HFILL} },
 	  { &hf_start,        { "Player",          "4c.start",       FT_UINT32, BASE_DEC,  NULL,               0x0, "", HFILL} },
-	  { &hf_peer_address, { "Peer address",    "4c.peeraddress", FT_IPv4,   BASE_NONE, NULL,               0x0, "", HFILL} },
+	  { &hf_peer_address, { "Peer Address",    "4c.peeraddress", FT_IPv4,   BASE_NONE, NULL,               0x0, "", HFILL} },
+	  { &hf_peer_port,    { "Peer Port",       "4c.peerport",    FT_UINT16, BASE_DEC,  NULL,               0x0, "", HFILL} },
+	  { &hf_peer_start,   { "Peer Start",      "4c.peerstart",   FT_UINT16, BASE_DEC,  NULL,               0x0, "", HFILL} },
 	  { &hf_name,         { "User Name",       "4c.username",    FT_STRING, BASE_NONE, NULL,               0x0, "", HFILL} },
 	  { &hf_pw,           { "User Password",   "4c.password",    FT_STRING, BASE_NONE, NULL,               0x0, "", HFILL} },
 	  { &hf_error,        { "Error",           "4c.error",       FT_UINT32, BASE_DEC,  VALS(error_values), 0x0, "", HFILL} },
