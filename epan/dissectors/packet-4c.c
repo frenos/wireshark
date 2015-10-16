@@ -147,13 +147,12 @@ static const value_string error_values[] = {
 #define ADD_PADDING(x) ((((x) + 3) >> 2) << 2)
 
 static void
-dissect_4c_error(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *four_c_tree)
+dissect_4c_error(tvbuff_t *message_tvb, packet_info *pinfo  _U_, proto_tree *four_c_tree)
 {
   proto_item *error_item = NULL;
   proto_tree *error_tree = NULL;
   int message_length = -1;
   
-  pinfo = pinfo;
   error_type = tvb_get_guint32(message_tvb,ERROR_OFFSET, NETWORK_BYTE_ORDER);
   
   error_item = proto_tree_add_item(four_c_tree,hf_error, message_tvb, ERROR_OFFSET, ERROR_LENGTH, NETWORK_BYTE_ORDER );
@@ -184,11 +183,10 @@ dissect_4c_error(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *four_c_t
 }
   
 static void
-dissect_4c_registration(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *four_c_tree)
+dissect_4c_registration(tvbuff_t *message_tvb, packet_info *pinfo _U_, proto_tree *four_c_tree)
 {
       int namelen, pwlen, offset;
       
-      pinfo = pinfo;
       proto_tree_add_item(four_c_tree, hf_name_length, message_tvb, NAMELENGTH_OFFSET, NAMELENGTH_LENGTH, NETWORK_BYTE_ORDER);
       proto_tree_add_item(four_c_tree, hf_pw_length,   message_tvb, PWLENGTH_OFFSET,   PWLENGTH_LENGTH,   NETWORK_BYTE_ORDER);
       namelen=tvb_get_guint16(message_tvb, NAMELENGTH_OFFSET, NETWORK_BYTE_ORDER);
@@ -199,10 +197,10 @@ dissect_4c_registration(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *f
 }
 
 static void
-dissect_4c_peerinfo(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *four_c_tree)
+dissect_4c_peerinfo(tvbuff_t *message_tvb, packet_info *pinfo  _U_, proto_tree *four_c_tree)
 {
       int namelen;
-      pinfo = pinfo;
+      
       proto_tree_add_item(four_c_tree, hf_peer_address, message_tvb, ADDRESS_OFFSET, IPV4_ADDRESS_LENGTH,NETWORK_BYTE_ORDER);
       proto_tree_add_item(four_c_tree, hf_peer_port, message_tvb, PORT_OFFSET, PORT_LENGTH,NETWORK_BYTE_ORDER);
       proto_tree_add_item(four_c_tree, hf_peer_start, message_tvb, PSTART_OFFSET, PSTART_LENGTH,NETWORK_BYTE_ORDER);
@@ -225,6 +223,7 @@ dissect_message(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *four_c_tr
 	if (four_c_tree) 
 	{
 		value_length = tvb_get_ntohs(message_tvb, LENGTH_OFFSET) - HEADER_LENGTH;
+		//always show MESSAGE_TYPE and MESSAGE_LENGTH, no matter the TYPE
 		msg_type_item = proto_tree_add_item(four_c_tree, hf_type,   message_tvb, TYPE_OFFSET,   TYPE_LENGTH,   NETWORK_BYTE_ORDER);
 		proto_tree_add_item(four_c_tree, hf_length, message_tvb, LENGTH_OFFSET, LENGTH_LENGTH, NETWORK_BYTE_ORDER);
 
@@ -235,6 +234,7 @@ dissect_message(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *four_c_tr
 				break;	
 			case HEARTBEAT_REQUEST_TYPE:
 			case HEARTBEAT_ACK_TYPE:
+				//HB_Request and HB_ACK both only have INFO as data (=value here)
 				proto_tree_add_item(four_c_tree, hf_value, message_tvb, VALUE_OFFSET, value_length, NETWORK_BYTE_ORDER);
 				break;
 			case SET_COLUMN_TYPE:
