@@ -37,6 +37,8 @@
 #include <epan/conversation.h>
 #include <stdio.h>
 #include "packet-tcp.h"
+#include "packet-udp.h"
+#include "packet-sctp.h"
 
 #define NETWORK_BYTE_ORDER FALSE
 #define SCTP_PORT_4C       55555
@@ -72,6 +74,8 @@ static gint error_type     = -1;
 
 static expert_field ei_4c_type_unknown = EI_INIT;
 static expert_field ei_4c_invalid_padding = EI_INIT;
+
+static dissector_handle_t sub_handle_4c;
 
 #define TYPE_LENGTH         2
 #define LENGTH_LENGTH       2
@@ -146,7 +150,23 @@ static const value_string error_values[] = {
 };  
 
 #define ADD_PADDING(x) ((((x) + 3) >> 2) << 2)
+/*
+typedef struct {
+	guint32	dst_addr;
+	guint32	clnt_port;
+	guint16	dst_port;
+	guint32	server_int_port;
+	int	proto;
+}conv_entry_t;
 
+typedef struct {
+	guint32	remote_addr;
+	guint32	clnt_port;
+	guint16	remote_port;
+	guint32	server_int_port;
+	int	proto;
+}redirect_entry_t;
+*/
 static void
 dissect_4c_error(tvbuff_t *message_tvb, packet_info *pinfo  _U_, proto_tree *four_c_tree)
 {
@@ -196,18 +216,65 @@ dissect_4c_registration(tvbuff_t *message_tvb, packet_info *pinfo _U_, proto_tre
       offset=ADD_PADDING(namelen);
       proto_tree_add_item(four_c_tree, hf_pw, message_tvb, NAME_OFFSET+offset, pwlen,FALSE);
 }
-
+/*
 static void
-dissect_4c_peerinfo(tvbuff_t *message_tvb, packet_info *pinfo  _U_, proto_tree *four_c_tree)
+add_new4c_conversation(packet_info *pinfo, conv_entry_t *conv_info)
+{
+  	conversation_t *conv;
+	redirect_entry_t *new_conv_info;
+
+	if (pinfo->fd->flags.visited) {
+		return;
+	}
+
+	conv = find_conversation( pinfo->fd->num, &pinfo->src,
+		&pinfo->dst, (port_type)conv_info->proto, conv_info->server_int_port,
+		conv_info->clnt_port, 0);
+
+	if ( !conv) {
+		conv = conversation_new( pinfo->fd->num, &pinfo->src, &pinfo->dst,
+			(port_type)conv_info->proto, conv_info->server_int_port,
+			conv_info->clnt_port, 0);
+	}
+	conversation_set_dissector(conv, sub_handle_4c);
+
+	new_conv_info = wmem_new(wmem_file_scope(), redirect_entry_t);
+
+	new_conv_info->remote_addr = conv_info->dst_addr;
+	new_conv_info->clnt_port = conv_info->clnt_port;
+	new_conv_info->remote_port = conv_info->dst_port;
+	new_conv_info->server_int_port = conv_info->server_int_port;
+	new_conv_info->proto = conv_info->proto;
+
+	conversation_add_proto_data(conv, proto_4c,new_conv_info);
+}
+*/
+static void
+dissect_4c_peerinfo(tvbuff_t *message_tvb, packet_info *pinfo , proto_tree *four_c_tree)
 {
       int namelen;
-      
+   /*   
+      conv_info->dst_addr = tvb_get_guint32(message_tvb, ADDRESS_OFFSET, NETWORK_BYTE_ORDER);
+      conv_info->dst_port = tvb_get_guint16(message_tvb, PORT_OFFSET, NETWORK_BYTE_ORDER);
+      conv_info->server_int_port = pinfo->destport;
+      conv_info->clnt_port = pinfo->srcport;
+      conv_info->proto = PT_UDP;
+      */      
+      printf("PRINT STRUCT -------------\n");
+      printf("addr in packet       : %i\n",tvb_get_guint32(message_tvb, ADDRESS_OFFSET, NETWORK_BYTE_ORDER));
+      printf("port in packet       : %i\n",tvb_get_guint16(message_tvb, PORT_OFFSET, NETWORK_BYTE_ORDER)); // 44444
+      printf("pinfo->destport      : %i\n",pinfo->destport); // UDP PORT 55555
+      printf("pinfo->srcport       : %i\n",pinfo->srcport); // UDP PORT 12345
+      fflush(stdout);
+     
       proto_tree_add_item(four_c_tree, hf_peer_address, message_tvb, ADDRESS_OFFSET, IPV4_ADDRESS_LENGTH,NETWORK_BYTE_ORDER);
       proto_tree_add_item(four_c_tree, hf_peer_port, message_tvb, PORT_OFFSET, PORT_LENGTH,NETWORK_BYTE_ORDER);
       proto_tree_add_item(four_c_tree, hf_peer_start, message_tvb, PSTART_OFFSET, PSTART_LENGTH,NETWORK_BYTE_ORDER);
       proto_tree_add_item(four_c_tree, hf_name_length, message_tvb, PNAMELENGTH_OFFSET, PNAMELENGTH_LENGTH, NETWORK_BYTE_ORDER);
       namelen=tvb_get_guint16(message_tvb, PNAMELENGTH_OFFSET, NETWORK_BYTE_ORDER);
       proto_tree_add_item(four_c_tree, hf_name, message_tvb, PNAME_OFFSET, namelen, NETWORK_BYTE_ORDER);
+      
+      //add_new4c_conversation(pinfo,conv_info);
 }
 
 static gboolean testpadding(packet_info *pinfo, proto_item *msg_type_item, guint16 type, guint16 padding_length){
@@ -231,7 +298,7 @@ static gboolean testpadding(packet_info *pinfo, proto_item *msg_type_item, guint
 	}
 	return TRUE;
 }
-  
+
 static void
 dissect_message(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *four_c_tree)
 {
@@ -290,10 +357,32 @@ dissect_message(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *four_c_tr
 static void
 dissect_4c_common(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)
 {
+  /*
+        conv_entry_t *conv_info;
+	conversation_t *conv;
+  */
 	col_set_str(pinfo->cinfo, COL_PROTOCOL, "4C");
 
 	col_clear(pinfo->cinfo, COL_INFO);
+	
+/*	
+	conv = find_or_create_conversation(pinfo);
 
+	conv_info = (conv_entry_t *)conversation_get_proto_data(conv, proto_4c);
+	if (!conv_info) {
+		conv_info = wmem_new(wmem_file_scope(), conv_entry_t);
+		conversation_add_proto_data(conv, proto_4c,
+			conv_info);
+	}
+	
+	printf("PRINT STRUCT -------------\n");
+	printf("conv_info->dst_addr       : %i\n",conv_info->dst_addr);
+	printf("conv_info->dst_port       : %i\n",conv_info->dst_port);
+	printf("conv_info->server_int_port: %i\n",conv_info->server_int_port);
+	printf("conv_info->clnt_port      : %i\n",conv_info->clnt_port);
+	printf("conv_info->proto          : %i\n",conv_info->proto);
+	fflush(stdout);
+*/	
 	if (tree) {
 		proto_item *four_c_item = NULL;
 		proto_tree *four_c_tree = NULL;
@@ -302,15 +391,6 @@ dissect_4c_common(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)
 		dissect_message(tvb, pinfo, four_c_tree);		
 	}
 }
-
-
-static int
-dissect_4c_sctp(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void *data _U_)
-{
-	dissect_4c_common(tvb, pinfo, tree);
-	return tvb_reported_length(tvb);
-}
-
 static guint
 get_4c_pdu_len(packet_info *pinfo _U_, tvbuff_t *tvb, int offset, void *data _U_)
 {
@@ -334,21 +414,81 @@ dissect_4c_tcp(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void *data)
 static void
 dissect_4c_udp(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)
 {
-	printf("Hallo Welt!");
-    fflush(stdout);
 	dissect_4c_common(tvb, pinfo, tree);
 }
 
-/*
-static gboolean
-dissect_4c_heur(tvbuff_t *tvb _U_, packet_info *pinfo _U_, proto_tree *tree _U_, void *data _U_)
+static void
+dissect_4c_sctp(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)
 {
-    conversation = find_or_create_conversation(pinfo)
-    conversation_set_dissector(conversation);
-    if (!test_4c_packet(tvb, pinfo, tree, data))
-        return FALSE; 
-    dissect_4c_sctp(tvb, pinfo, tree, data);
-    return TRUE;
+	dissect_4c_common(tvb, pinfo, tree);
+}
+/*
+static void dissect_4c_sub( tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)
+{
+  
+
+
+	guint32 *ptr;
+	redirect_entry_t *redirect_info;
+	conversation_t *conv;
+	proto_tree      *tree_4c;
+	proto_item      *ti;
+
+	
+	printf("4C SUB DISSECT\n");
+	fflush(stdout);
+	
+	conv = find_conversation( pinfo->fd->num, &pinfo->src, &pinfo->dst,
+		pinfo->ptype, pinfo->srcport, pinfo->destport, 0);
+
+
+
+	redirect_info = (redirect_entry_t *)conversation_get_proto_data(conv,
+		proto_4c);
+
+	col_set_str(pinfo->cinfo, COL_PROTOCOL, "4C");
+
+	col_set_str(pinfo->cinfo, COL_INFO,
+			(( redirect_info->proto == PT_TCP) ? "TCP stream" :
+			 "UDP packets"));
+
+	if ( tree) {
+		ti = proto_tree_add_item( tree, proto_4c, tvb, 0, 0,
+					  ENC_NA );
+
+		tree_4c = proto_item_add_subtree(ti, ett_4c);
+
+		proto_tree_add_uint( tree_4c, hf_peer_port, tvb, 0, 0,
+			redirect_info->remote_port);
+
+		proto_tree_add_ipv4( tree_4c, hf_peer_address, tvb, 0, 0,
+			redirect_info->remote_addr);
+
+	}
+
+ //set pinfo->{src/dst port} and call the TCP or UDP sub-dissector lookup 
+
+	if ( pinfo->srcport == redirect_info->clnt_port)
+		ptr = &pinfo->destport;
+	else
+		ptr = &pinfo->srcport;
+
+	*ptr = redirect_info->remote_port;
+
+	printf("REMOTE PORT: %i\n",*ptr);
+	fflush(stdout);
+	
+	if ( redirect_info->proto == PT_TCP)
+		decode_tcp_ports( tvb, 0, pinfo, tree, pinfo->srcport,
+			pinfo->destport, NULL, NULL);
+	if(redirect_info->proto == PT_SCTP)
+		decode_sctp_ports( tvb, 0, pinfo, tree, pinfo->srcport,
+			pinfo->destport, -1);
+	if(redirect_info->proto == PT_UDP)
+		decode_udp_ports( tvb, 0, pinfo, tree, pinfo->srcport,
+			pinfo->destport, -1);
+
+	*ptr = redirect_info->server_int_port;
 }
 */
 void
@@ -397,6 +537,7 @@ proto_register_4c(void)
 	                               "Desegment all 4C messages spanning multiple TCP segments",
 	                               "Whether the 4C dissector should desegment all messages spanning multiple TCP segments",
 	                               &four_c_desegment);
+	//sub_handle_4c = create_dissector_handle(dissect_4c_sub,	proto_4c);
 }
 
 void
@@ -408,10 +549,10 @@ proto_reg_handoff_4c(void)
 	static guint32            current_ppid;
 	
 	
-	four_c_sctp_handle = new_create_dissector_handle(dissect_4c_sctp, proto_4c);
+	four_c_sctp_handle = create_dissector_handle(dissect_4c_sctp, proto_4c);
 	four_c_tcp_handle  = new_create_dissector_handle(dissect_4c_tcp,  proto_4c);
 	four_c_udp_handle  = create_dissector_handle(dissect_4c_udp,  proto_4c);
-
+	sub_handle_4c = four_c_tcp_handle;
 	current_ppid = new_4c_ppid;
 	dissector_add_uint("sctp.ppi", current_ppid, four_c_sctp_handle);
 	dissector_add_uint("sctp.port", SCTP_PORT_4C, four_c_sctp_handle);
