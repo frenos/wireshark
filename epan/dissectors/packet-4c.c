@@ -36,6 +36,8 @@
 #include <tvbuff-int.h>
 #include <epan/conversation.h>
 #include <stdio.h>
+#include <epan/to_str.h>
+
 #include "packet-tcp.h"
 #include "packet-udp.h"
 #include "packet-sctp.h"
@@ -249,24 +251,37 @@ add_new4c_conversation(packet_info *pinfo, conv_entry_t *conv_info)
 	conversation_add_proto_data(conv, proto_4c,new_conv_info);
 }
 */
+
+
+
 static void
 dissect_4c_peerinfo(tvbuff_t *message_tvb, packet_info *pinfo , proto_tree *four_c_tree)
 {
       int namelen;
+
+      gchar *addrbuf;
+      int len = sizeof(gchar)*32;
+      addrbuf = (gchar *)malloc(len);
+ 
    /*   
       conv_info->dst_addr = tvb_get_guint32(message_tvb, ADDRESS_OFFSET, NETWORK_BYTE_ORDER);
       conv_info->dst_port = tvb_get_guint16(message_tvb, PORT_OFFSET, NETWORK_BYTE_ORDER);
       conv_info->server_int_port = pinfo->destport;
       conv_info->clnt_port = pinfo->srcport;
       conv_info->proto = PT_UDP;
-      */      
+      */  
+
       printf("PRINT STRUCT -------------\n");
       printf("addr in packet       : %i\n",tvb_get_guint32(message_tvb, ADDRESS_OFFSET, NETWORK_BYTE_ORDER));
       printf("port in packet       : %i\n",tvb_get_guint16(message_tvb, PORT_OFFSET, NETWORK_BYTE_ORDER)); // 44444
+      
+      address_to_str_buf(&(pinfo->dst),addrbuf,len);
+      printf("pinfo->destaddr      : %s\n",addrbuf); // ADDR
+      
       printf("pinfo->destport      : %i\n",pinfo->destport); // UDP PORT 55555
       printf("pinfo->srcport       : %i\n",pinfo->srcport); // UDP PORT 12345
       fflush(stdout);
-     
+    
       proto_tree_add_item(four_c_tree, hf_peer_address, message_tvb, ADDRESS_OFFSET, IPV4_ADDRESS_LENGTH,NETWORK_BYTE_ORDER);
       proto_tree_add_item(four_c_tree, hf_peer_port, message_tvb, PORT_OFFSET, PORT_LENGTH,NETWORK_BYTE_ORDER);
       proto_tree_add_item(four_c_tree, hf_peer_start, message_tvb, PSTART_OFFSET, PSTART_LENGTH,NETWORK_BYTE_ORDER);
