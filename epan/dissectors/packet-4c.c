@@ -68,8 +68,11 @@ static int hf_pw           = -1;
 static int hf_start        = -1;
 static int hf_error	   = -1;
 static int hf_other        = -1;
+static int hf_padding      = -1;
 
 static gint ett_4c         = -1;
+static gint ett_4c_type_unknown = -1;
+static gint ett_4c_invalid_padding = -1;
 
 static gboolean four_c_desegment = TRUE;
 static gint error_type     = -1;
@@ -255,7 +258,7 @@ add_new4c_conversation(packet_info *pinfo, conv_entry_t *conv_info)
 
 
 static void
-dissect_4c_peerinfo(tvbuff_t *message_tvb, packet_info *pinfo , proto_tree *four_c_tree)
+dissect_4c_peerinfo(tvbuff_t *message_tvb, packet_info *pinfo , proto_tree *four_c_tree, gint32 padding_length)
 {
       int namelen;
 
@@ -289,10 +292,15 @@ dissect_4c_peerinfo(tvbuff_t *message_tvb, packet_info *pinfo , proto_tree *four
       namelen=tvb_get_guint16(message_tvb, PNAMELENGTH_OFFSET, NETWORK_BYTE_ORDER);
       proto_tree_add_item(four_c_tree, hf_name, message_tvb, PNAME_OFFSET, namelen, NETWORK_BYTE_ORDER);
       
+      if(padding_length < 0)
+	proto_tree_add_int_format_value(four_c_tree, hf_padding, message_tvb, 0,0, padding_length, "padding was %d", padding_length);
+      else
+	proto_tree_add_int_format_value(four_c_tree, hf_padding, message_tvb, PNAME_OFFSET+namelen,padding_length, padding_length, "padding was %d", padding_length);
+      
       //add_new4c_conversation(pinfo,conv_info);
 }
 
-static gboolean testpadding(packet_info *pinfo, proto_item *msg_type_item, guint16 type, guint16 padding_length){
+static gboolean testpadding(packet_info *pinfo, proto_item *msg_type_item, guint16 type, gint32 padding_length){
 	switch (type) {
 		case REGISTRATION_REQUEST_TYPE:		
 		case HEARTBEAT_REQUEST_TYPE:
@@ -306,7 +314,7 @@ static gboolean testpadding(packet_info *pinfo, proto_item *msg_type_item, guint
 		case REGISTRATION_NACK_TYPE:
 		case SERVER_ANNOUNCE_TYPE:
 			if(padding_length>0){
-			  expert_add_info(pinfo, msg_type_item, &ei_4c_invalid_padding);
+			  expert_add_info_format(pinfo, msg_type_item, &ei_4c_invalid_padding, "Message Type may not have padding.");
 			  return FALSE;
 			}
 			break;
@@ -315,63 +323,95 @@ static gboolean testpadding(packet_info *pinfo, proto_item *msg_type_item, guint
 }
 
 static void
-dissect_message(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *four_c_tree)
+dissect_message(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *tree, proto_item *four_c_item)
 {
-	guint16 type, length, padding_length , reported_length, value_length;
+	guint16 type, length, reported_length, value_length;
 	proto_item *msg_type_item;
+	proto_tree *pt;
+	gint32 padding_length;
+	
 	gboolean padding_ok;
+	
+	pt = proto_item_add_subtree(four_c_item,ett_4c_type_unknown);
 	
 	type            = tvb_get_ntohs(message_tvb, TYPE_OFFSET);
 	length          = tvb_get_ntohs(message_tvb, LENGTH_OFFSET);
 	reported_length = tvb_reported_length(message_tvb);
 	padding_length  = reported_length - length;
+	printf("reported_length: %d  | length: %d \n", reported_length, length);
+	fflush(stdout);
+	
 	
 	col_add_fstr(pinfo->cinfo, COL_INFO, "%s ", val_to_str(type, type_values, "Unknown Type"));
 	col_set_fence(pinfo->cinfo, COL_INFO);
 	
-	if (four_c_tree) 
+	switch(type){
+	  		case REGISTRATION_REQUEST_TYPE:
+			case REGISTRATION_NACK_TYPE:
+			case REGISTRATION_ACK_TYPE:
+			case HEARTBEAT_REQUEST_TYPE:
+			case HEARTBEAT_ACK_TYPE:
+			case SET_COLUMN_TYPE:
+			case SET_COLUMN_ACK_TYPE:
+			case PEER_INFO_TYPE:
+			case ERROR_CAUSE_TYPE:
+			case SERVER_ANNOUNCE_TYPE:
+				break;
+			default:
+			  expert_add_info(pinfo, four_c_item, &ei_4c_type_unknown);
+	}
+	msg_type_item = proto_tree_add_item(pt, hf_type,   message_tvb, TYPE_OFFSET,   TYPE_LENGTH,   NETWORK_BYTE_ORDER);
+	if (tree) 
 	{
 		value_length = length - HEADER_LENGTH;
 		//always show MESSAGE_TYPE and MESSAGE_LENGTH, no matter the TYPE
-		msg_type_item = proto_tree_add_item(four_c_tree, hf_type,   message_tvb, TYPE_OFFSET,   TYPE_LENGTH,   NETWORK_BYTE_ORDER);
-		proto_tree_add_item(four_c_tree, hf_length, message_tvb, LENGTH_OFFSET, LENGTH_LENGTH, NETWORK_BYTE_ORDER);
-
+		
+		proto_tree_add_item(pt, hf_length, message_tvb, LENGTH_OFFSET, LENGTH_LENGTH, NETWORK_BYTE_ORDER);
+		
 		padding_ok = testpadding(pinfo,msg_type_item,type,padding_length);
 		
 		if (value_length > 0 && padding_ok) {
 			switch (type) {
 			case REGISTRATION_REQUEST_TYPE:
-				dissect_4c_registration(message_tvb, pinfo, four_c_tree);
+				dissect_4c_registration(message_tvb, pinfo, pt);
 				break;	
 			case HEARTBEAT_REQUEST_TYPE:
 			case HEARTBEAT_ACK_TYPE:
 				//HB_Request and HB_ACK both only have INFO as data (=value here)
-				proto_tree_add_item(four_c_tree, hf_value, message_tvb, VALUE_OFFSET, value_length, NETWORK_BYTE_ORDER);
+				proto_tree_add_item(pt, hf_value, message_tvb, VALUE_OFFSET, value_length, NETWORK_BYTE_ORDER);
 				break;
 			case SET_COLUMN_TYPE:
-				proto_tree_add_item(four_c_tree, hf_value_seq, message_tvb, SEQNO_OFFSET, SEQNO_LENGTH,NETWORK_BYTE_ORDER);
-				proto_tree_add_item(four_c_tree, hf_value_col, message_tvb, COLUMN_OFFSET, COLUMN_LENGTH,NETWORK_BYTE_ORDER);
+				proto_tree_add_item(pt, hf_value_seq, message_tvb, SEQNO_OFFSET, SEQNO_LENGTH,NETWORK_BYTE_ORDER);
+				proto_tree_add_item(pt, hf_value_col, message_tvb, COLUMN_OFFSET, COLUMN_LENGTH,NETWORK_BYTE_ORDER);
 				break;
 			case SET_COLUMN_ACK_TYPE:
-				proto_tree_add_item(four_c_tree, hf_value_seq, message_tvb, SEQNO_OFFSET, SEQNO_LENGTH, NETWORK_BYTE_ORDER);
+				proto_tree_add_item(pt, hf_value_seq, message_tvb, SEQNO_OFFSET, SEQNO_LENGTH, NETWORK_BYTE_ORDER);
 				break;
 			case PEER_INFO_TYPE:
-				dissect_4c_peerinfo(message_tvb,pinfo,four_c_tree);
+				dissect_4c_peerinfo(message_tvb,pinfo,pt, padding_length);
 				break;
 			case ERROR_CAUSE_TYPE:
-				dissect_4c_error(message_tvb,pinfo,four_c_tree);
+				dissect_4c_error(message_tvb,pinfo,pt);
 				break;
-			default:
+			//default:
 				//msg_item = proto_tree_add_item(four_c_tree, hf_type, message_tvb, TYPE_OFFSET, TYPE_LENGTH, NETWORK_BYTE_ORDER);
-				expert_add_info(pinfo, msg_type_item, &ei_4c_type_unknown);
+				//my_tree = proto_item_add_subtree(msg_type_item, ett_4c);
+				//four_c_tree = proto_item_add_subtree(msg_type_item,ett_4c_type_unknown);
+				//expert_add_info(pinfo, four_c_item, &ei_4c_type_unknown);
+			
+				//expert_add_info_format(pinfo, four_c_tree, &ei_4c_type_unknown, "unknown stuffs");
 			}
 		}
+	}
+	if(padding_length<0 || padding_length > 3){
+	  expert_add_info_format(pinfo, four_c_item, &ei_4c_invalid_padding, "Padding must be between 0 and 3. Padding was %d", padding_length);
 	}
 }
 
 static void
 dissect_4c_common(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)
 {
+      proto_item *four_c_item;
   /*
         conv_entry_t *conv_info;
 	conversation_t *conv;
@@ -398,13 +438,10 @@ dissect_4c_common(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)
 	printf("conv_info->proto          : %i\n",conv_info->proto);
 	fflush(stdout);
 */	
-	if (tree) {
-		proto_item *four_c_item = NULL;
-		proto_tree *four_c_tree = NULL;
+		//proto_tree *four_c_tree = NULL;
 		four_c_item = proto_tree_add_item(tree, proto_4c, tvb, 0, -1, ENC_NA);
-		four_c_tree = proto_item_add_subtree(four_c_item, ett_4c);
-		dissect_message(tvb, pinfo, four_c_tree);		
-	}
+		//four_c_tree = proto_item_add_subtree(four_c_item, ett_4c);
+		dissect_message(tvb, pinfo, tree, four_c_item);	
 }
 static guint
 get_4c_pdu_len(packet_info *pinfo _U_, tvbuff_t *tvb, int offset, void *data _U_)
@@ -527,16 +564,19 @@ proto_register_4c(void)
 	  { &hf_name,         { "User Name",       "4c.username",    FT_STRING, BASE_NONE, NULL,               0x0, "", HFILL} },
 	  { &hf_pw,           { "User Password",   "4c.password",    FT_STRING, BASE_NONE, NULL,               0x0, "", HFILL} },
 	  { &hf_error,        { "Error",           "4c.error",       FT_UINT32, BASE_DEC,  VALS(error_values), 0x0, "", HFILL} },
-	  { &hf_other,        { "Other",           "4c.other",       FT_STRING, BASE_NONE, NULL,               0x0, "", HFILL} }
+	  { &hf_other,        { "Other",           "4c.other",       FT_STRING, BASE_NONE, NULL,               0x0, "", HFILL} },
+	  { &hf_padding,      { "Padding",         "4c.padding",     FT_INT32,  BASE_DEC,  NULL,               0x0, "", HFILL} }
 	};
 
 	static gint *ett[] = {
-		&ett_4c
+		&ett_4c,
+		&ett_4c_invalid_padding,
+		&ett_4c_type_unknown
 	};
 
 	static ei_register_info ei[] = {
-          { &ei_4c_type_unknown, 	{ "4c.type_unknown",	PI_MALFORMED, PI_ERROR, "Type is unknown", 	EXPFILL }},
-	  { &ei_4c_invalid_padding, 	{ "4c.invalid_padding",	PI_MALFORMED, PI_ERROR, "Invalid padding size", EXPFILL }}
+          { &ei_4c_type_unknown, 	{ "4c.type_unknown",	PI_PROTOCOL, PI_ERROR, "Type is unknown", 	EXPFILL }},
+	  { &ei_4c_invalid_padding, 	{ "4c.invalid_padding",	PI_PROTOCOL, PI_ERROR, "Invalid padding size", EXPFILL }}
         };
 	
 
