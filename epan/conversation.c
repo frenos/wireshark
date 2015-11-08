@@ -31,7 +31,7 @@
 #include "conversation.h"
 
 /* define DEBUG_CONVERSATION for pretty debug printing */
-#define DEBUG_CONVERSATION
+//#define DEBUG_CONVERSATION
 #include "conversation_debug.h"
 
 #ifdef DEBUG_CONVERSATION

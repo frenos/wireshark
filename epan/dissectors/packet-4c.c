@@ -80,7 +80,9 @@ static gint error_type     = -1;
 static expert_field ei_4c_type_unknown = EI_INIT;
 static expert_field ei_4c_invalid_padding = EI_INIT;
 
-static dissector_handle_t sub_handle_4c;
+static dissector_handle_t four_c_sctp_handle;
+static dissector_handle_t four_c_tcp_handle;
+static dissector_handle_t four_c_udp_handle;
 
 #define TYPE_LENGTH         2
 #define LENGTH_LENGTH       2
@@ -207,14 +209,9 @@ dissect_4c_registration(tvbuff_t *message_tvb, packet_info *pinfo _U_, proto_tre
 }
 
 static void
-dissect_4c_peerinfo(tvbuff_t *message_tvb, packet_info *pinfo , proto_tree *four_c_tree, gint32 padding_length)
+dissect_4c_peerinfo(tvbuff_t *message_tvb, proto_tree *four_c_tree, gint32 padding_length)
 {
       int namelen;
-      conversation_t *conv;
-      guint32 port, addr;
-      address *addr_for_conv;
-      gchar *addrbuf; 
-      int len = sizeof(gchar)*32;
 
       proto_tree_add_item(four_c_tree, hf_peer_address, message_tvb, ADDRESS_OFFSET, IPV4_ADDRESS_LENGTH,NETWORK_BYTE_ORDER);
       proto_tree_add_item(four_c_tree, hf_peer_port, message_tvb, PORT_OFFSET, PORT_LENGTH,NETWORK_BYTE_ORDER);
@@ -226,42 +223,41 @@ dissect_4c_peerinfo(tvbuff_t *message_tvb, packet_info *pinfo , proto_tree *four
       if(padding_length < 0)
 	proto_tree_add_int_format_value(four_c_tree, hf_padding, message_tvb, 0,0, padding_length, "padding was %d", padding_length);
       else
-	proto_tree_add_int_format_value(four_c_tree, hf_padding, message_tvb, PNAME_OFFSET+namelen,padding_length, padding_length, "padding was %d", padding_length);
-      
+	proto_tree_add_int_format_value(four_c_tree, hf_padding, message_tvb, PNAME_OFFSET+namelen,padding_length, padding_length, "padding was %d", padding_length); 
+}
+
+static void
+add_4c_conversation(tvbuff_t *message_tvb, packet_info *pinfo)
+{
+      conversation_t *conv;
+      guint32 port, addr;
+      address *addr_for_conv;
+  
       if (pinfo->fd->flags.visited) {
 		return;
       }
       
-      addrbuf = (gchar *)malloc(len);
       addr_for_conv = (address *)malloc(sizeof(struct _address));
       
-      if(!addr_for_conv || !addrbuf){
-	 printf("malloc fehlgeschlagen\n");
+      if(!addr_for_conv){
+	 printf("## allokation für \"addr_for_conv\" fehlgeschlagen ##\n");
+	 fflush(stdout);
 	 return;
       }
-      
-      
+         
       addr = (guint)tvb_get_guint32(message_tvb, ADDRESS_OFFSET, NETWORK_BYTE_ORDER);  
       port = tvb_get_guint16(message_tvb, PORT_OFFSET, NETWORK_BYTE_ORDER);
-      
-      set_address(addr_for_conv,AT_IPv4,len,&addr);   
-      address_to_str_buf(addr_for_conv,addrbuf,len);
-	 
-      
-      printf("SIND HIER VOR DER SUCHE\n");
-      fflush(stdout);
-      
-      conv = find_conversation(pinfo->fd->num, addr_for_conv, addr_for_conv, PT_UDP, port, port, NO_ADDR_B | NO_PORT_B);      
-      
-      
-      
-      if(!conv){
-	printf("SIND HIER VOR DEM NEW\n");
-	fflush(stdout);
-	conv = conversation_new(pinfo->fd->num, addr_for_conv, addr_for_conv, PT_UDP, port, port, NO_ADDR2 | NO_PORT2);
-	conv = find_conversation(pinfo->fd->num, addr_for_conv, addr_for_conv, PT_UDP, port, port, NO_ADDR_B | NO_PORT_B);   
-      }
+     
+      addr = g_htonl(addr);
 
+      set_address(addr_for_conv,AT_IPv4,(sizeof(gchar)*4),&addr);   	 
+      
+      conv = find_conversation(pinfo->fd->num, addr_for_conv, addr_for_conv, PT_UDP, port, port, NO_ADDR_B | NO_PORT_B);           
+  
+      if(!conv){
+	conv = conversation_new(pinfo->fd->num, addr_for_conv, addr_for_conv, PT_UDP, port, port, NO_ADDR2 | NO_PORT2);
+	conversation_set_dissector(conv,four_c_udp_handle);
+      }
 }
 
 static gboolean testpadding(packet_info *pinfo, proto_item *msg_type_item, guint16 type, gint32 padding_length){
@@ -302,14 +298,14 @@ dissect_message(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *tree, pro
 	length          = tvb_get_ntohs(message_tvb, LENGTH_OFFSET);
 	reported_length = tvb_reported_length(message_tvb);
 	padding_length  = reported_length - length;
-	printf("reported_length: %d  | length: %d \n", reported_length, length);
-	fflush(stdout);
 	
 	
 	col_add_fstr(pinfo->cinfo, COL_INFO, "%s ", val_to_str(type, type_values, "Unknown Type"));
 	col_set_fence(pinfo->cinfo, COL_INFO);
 	
 	switch(type){
+			case PEER_INFO_TYPE:
+			  add_4c_conversation(message_tvb,pinfo);
 	  		case REGISTRATION_REQUEST_TYPE:
 			case REGISTRATION_NACK_TYPE:
 			case REGISTRATION_ACK_TYPE:
@@ -317,7 +313,6 @@ dissect_message(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *tree, pro
 			case HEARTBEAT_ACK_TYPE:
 			case SET_COLUMN_TYPE:
 			case SET_COLUMN_ACK_TYPE:
-			case PEER_INFO_TYPE:
 			case ERROR_CAUSE_TYPE:
 			case SERVER_ANNOUNCE_TYPE:
 				break;
@@ -350,7 +345,7 @@ dissect_message(tvbuff_t *message_tvb, packet_info *pinfo, proto_tree *tree, pro
 				proto_tree_add_item(pt, hf_value_seq, message_tvb, SEQNO_OFFSET, SEQNO_LENGTH, NETWORK_BYTE_ORDER);
 				break;
 			case PEER_INFO_TYPE:
-				dissect_4c_peerinfo(message_tvb,pinfo,pt, padding_length);
+				dissect_4c_peerinfo(message_tvb,pt, padding_length);
 				break;
 			case ERROR_CAUSE_TYPE:
 				dissect_4c_error(message_tvb,pinfo,pt);
@@ -462,16 +457,12 @@ proto_register_4c(void)
 void
 proto_reg_handoff_4c(void)
 {
-	static dissector_handle_t four_c_sctp_handle;
-	static dissector_handle_t four_c_tcp_handle;
-	static dissector_handle_t four_c_udp_handle;
 	static guint32            current_ppid;
 	
 	
 	four_c_sctp_handle = create_dissector_handle(dissect_4c_sctp, proto_4c);
 	four_c_tcp_handle  = new_create_dissector_handle(dissect_4c_tcp,  proto_4c);
 	four_c_udp_handle  = create_dissector_handle(dissect_4c_udp,  proto_4c);
-	sub_handle_4c = four_c_tcp_handle;
 	current_ppid = new_4c_ppid;
 	dissector_add_uint("sctp.ppi", current_ppid, four_c_sctp_handle);
 	dissector_add_uint("sctp.port", SCTP_PORT_4C, four_c_sctp_handle);
